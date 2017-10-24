@@ -2257,7 +2257,7 @@ class BuildOwner {
         assert(_dirtyElements[index]._inDirtyList);
         assert(!_dirtyElements[index]._active || _dirtyElements[index]._debugIsInScope(context));
         try {
-          _dirtyElements[index].rebuild();
+          _dirtyElements[index]._rebuild();
         } catch (e, stack) {
           _debugReportException(
             'while rebuilding dirty elements', e, stack,
@@ -2674,6 +2674,7 @@ abstract class Element extends DiagnosticableTree implements BuildContext {
       }
       return true;
     }());
+    assert(owner._debugCurrentBuildTarget == this);
     if (newWidget == null) {
       if (child != null)
         deactivateChild(child);
@@ -2688,7 +2689,7 @@ abstract class Element extends DiagnosticableTree implements BuildContext {
       if (Widget.canUpdate(child.widget, newWidget)) {
         if (child.slot != newSlot)
           updateSlotForChild(child, newSlot);
-        child.update(newWidget);
+        child._update(newWidget);
         assert(child.widget == newWidget);
         assert(() {
           child.owner._debugElementWasRebuilt(child);
@@ -2753,6 +2754,44 @@ abstract class Element extends DiagnosticableTree implements BuildContext {
         && _active
         && Widget.canUpdate(widget, newWidget));
     _widget = newWidget;
+  }
+
+  // Wrap [mount] in build phase.
+  void _mount(Element parent, dynamic newSlot) {
+    _buildScope(parent?.owner, () { mount(parent, newSlot); });
+  }
+
+  // Wrap [update] in build phase.
+  void _update(Widget newWidget) {
+    _buildScope(owner, () { update(newWidget); });
+  }
+
+  // Wrap [rebuild] in build phase.
+  void _rebuild() {
+    assert(_debugLifecycleState != _ElementLifecycle.initial);
+    if (!_active || !_dirty)
+      return;
+    _buildScope(owner, rebuild);
+  }
+
+  void _buildScope(BuildOwner buildOwner, VoidCallback callback, {VoidCallback before = _noop, VoidCallback after = _noop}) {
+    Element debugPreviousBuildTarget;
+    try {
+      assert(() {
+        debugPreviousBuildTarget = buildOwner._debugCurrentBuildTarget;
+        buildOwner._debugCurrentBuildTarget = this;
+        return true;
+      }());
+      before();
+      callback();
+    } finally {
+      after();
+      assert(() {
+        assert(buildOwner._debugCurrentBuildTarget == this);
+        buildOwner._debugCurrentBuildTarget = debugPreviousBuildTarget;
+        return true;
+      }());
+    }
   }
 
   /// Change the slot that the given child occupies in its parent.
@@ -2882,6 +2921,7 @@ abstract class Element extends DiagnosticableTree implements BuildContext {
   @protected
   Element inflateWidget(Widget newWidget, dynamic newSlot) {
     assert(newWidget != null);
+    assert(owner._debugCurrentBuildTarget == this);
     final Key key = newWidget.key;
     if (key is GlobalKey) {
       final Element newChild = _retakeInactiveElement(key, newWidget);
@@ -2896,7 +2936,7 @@ abstract class Element extends DiagnosticableTree implements BuildContext {
     }
     final Element newChild = newWidget.createElement();
     assert(() { _debugCheckForCycles(newChild); return true; }());
-    newChild.mount(this, newSlot);
+    newChild._mount(this, newSlot);
     assert(newChild._debugLifecycleState == _ElementLifecycle.active);
     return newChild;
   }
@@ -3428,8 +3468,8 @@ abstract class Element extends DiagnosticableTree implements BuildContext {
   /// called to mark this element dirty, by [mount] when the element is first
   /// built, and by [update] when the widget has changed.
   void rebuild() {
-    assert(_debugLifecycleState != _ElementLifecycle.initial);
-    if (!_active || !_dirty)
+    assert(_active);
+    if (!_dirty)
       return;
     assert(() {
       if (debugPrintRebuildDirtyWidgets) {
@@ -3444,18 +3484,8 @@ abstract class Element extends DiagnosticableTree implements BuildContext {
     }());
     assert(_debugLifecycleState == _ElementLifecycle.active);
     assert(owner._debugStateLocked);
-    Element debugPreviousBuildTarget;
-    assert(() {
-      debugPreviousBuildTarget = owner._debugCurrentBuildTarget;
-      owner._debugCurrentBuildTarget = this;
-      return true;
-    }());
+    assert(owner._debugCurrentBuildTarget == this);
     performRebuild();
-    assert(() {
-      assert(owner._debugCurrentBuildTarget == this);
-      owner._debugCurrentBuildTarget = debugPreviousBuildTarget;
-      return true;
-    }());
     assert(!_dirty);
   }
 
@@ -4245,6 +4275,7 @@ abstract class RenderObjectElement extends Element {
   List<Element> updateChildren(List<Element> oldChildren, List<Widget> newWidgets, { Set<Element> forgottenChildren }) {
     assert(oldChildren != null);
     assert(newWidgets != null);
+    assert(owner._debugCurrentBuildTarget == this);
 
     Element replaceWithNullIfForgotten(Element child) {
       return forgottenChildren != null && forgottenChildren.contains(child) ? null : child;
@@ -4706,3 +4737,5 @@ void _debugReportException(String context, dynamic exception, StackTrace stack, 
     informationCollector: informationCollector,
   ));
 }
+
+void _noop() {}
