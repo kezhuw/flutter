@@ -3658,8 +3658,16 @@ class StatefulElement extends ComponentElement {
     assert(_state._debugLifecycleState == _StateLifecycle.created);
   }
 
+  bool _dependenciesChanged = false;
+
   @override
-  Widget build() => state.build(this);
+  Widget build() {
+    if (_dependenciesChanged) {
+      _state.didChangeDependencies();
+      _dependenciesChanged = false;
+    }
+    return state.build(this);
+  }
 
   /// The [State] instance associated with this location in the tree.
   ///
@@ -3786,7 +3794,7 @@ class StatefulElement extends ComponentElement {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _state.didChangeDependencies();
+    _dependenciesChanged = true;
   }
 
   @override
